@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'timedatectl' >>"${MOCK_LOG}/timedatectl.log"
+printf ' %q' "$@" >>"${MOCK_LOG}/timedatectl.log"
+printf '\n' >>"${MOCK_LOG}/timedatectl.log"
+
+if [[ "${1:-}" == "show" ]]; then
+  printf 'America/La_Paz\n'
+fi
+exit 0

@@ -1,0 +1,107 @@
+#cloud-config
+
+# ==============================================================================
+# ETAPA 3A-R: Cloud-Init para Instancia Frontend (Amazon Linux 2023)
+# ==============================================================================
+
+# 1. packages: Instalación de dependencias del sistema
+packages:
+  - git
+  - nodejs24
+  - npm
+  - nginx
+
+# 2. write_files: Configuración de Nginx y script de actualización
+write_files:
+  # Virtual host de Nginx para la SPA y Proxy Inverso hacia el Backend
+  - path: /etc/nginx/conf.d/control-asistencia.conf
+    permissions: '0644'
+    owner: root:root
+    content: |
+      server {
+          listen 80 default_server;
+          listen [::]:80 default_server;
+          server_name _;
+
+          root /var/www/control-asistencia;
+          index index.html;
+          client_max_body_size 10m;
+
+          # Endpoint de salud local para verificación de Nginx
+          location = /healthz {
+              access_log off;
+              add_header Content-Type text/plain;
+              return 200 "ok\n";
+          }
+
+          # Redirección de /api a /api/ conservando método HTTP y cuerpo
+          location = /api {
+              return 308 /api/;
+          }
+
+          # Proxy inverso hacia la IP privada del Backend en TCP 3000
+          location /api/ {
+              proxy_pass http://${BACKEND_PRIVATE_IP}:3000;
+              proxy_http_version 1.1;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $scheme;
+              proxy_connect_timeout 5s;
+              proxy_read_timeout 60s;
+          }
+
+          # Enrutamiento React SPA (fallback a index.html)
+          location / {
+              try_files $uri $uri/ /index.html;
+          }
+      }
+
+  # Script de actualización para GitHub Actions vía SSM (git push)
+  - path: /usr/local/bin/deploy-frontend.sh
+    permissions: '0755'
+    owner: root:root
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      echo "=== Despliegue de actualización Frontend ==="
+      cd /opt/control-asistencia-frontend
+      git fetch origin "${GIT_BRANCH}"
+      git reset --hard "origin/${GIT_BRANCH}"
+      npm ci
+      VITE_API_URL=/api npm run build
+      cp -r dist/* /var/www/control-asistencia/
+      chmod -R 755 /var/www/control-asistencia
+      systemctl reload nginx
+      echo "=== Frontend actualizado y Nginx recargado exitosamente ==="
+
+# 3. runcmd: Clonado, compilación y publicación web
+runcmd:
+  # Configurar zona horaria del sistema
+  - timedatectl set-timezone America/La_Paz
+
+  # Directorios de despliegue y permisos
+  - mkdir -p /var/www/control-asistencia /opt/control-asistencia-frontend
+  - chown -R ec2-user:ec2-user /opt/control-asistencia-frontend /var/www/control-asistencia
+
+  # Clonar repositorio frontend como ec2-user
+  - su - ec2-user -c "git clone -b ${GIT_BRANCH} ${FRONTEND_REPO_URL} /opt/control-asistencia-frontend"
+
+  # Instalar dependencias y compilar SPA con VITE_API_URL=/api
+  - su - ec2-user -c "cd /opt/control-asistencia-frontend && npm ci && VITE_API_URL=/api npm run build"
+
+  # Publicar artefacto compilado en la raíz web de Nginx
+  - cp -r /opt/control-asistencia-frontend/dist/* /var/www/control-asistencia/
+  - chmod -R 755 /var/www/control-asistencia
+
+  # Limpiar configuración por defecto y validar
+  - rm -f /etc/nginx/conf.d/default.conf
+  - nginx -t
+
+  # Habilitar e iniciar servicio Nginx
+  - systemctl enable --now nginx
+  - systemctl reload nginx
+
+  # Validar que Nginx responde
+  - curl -fsS http://127.0.0.1/healthz
+

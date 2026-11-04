@@ -1,0 +1,355 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Control de Asistencia - arquitectura EC2 académica
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: control-asistencia
+    AllowedPattern: "^[a-z][a-z0-9-]+$"
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+  VpcCidr:
+    Type: String
+    Default: 10.10.0.0/16
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.10.1.0/24
+  AvailabilityZone:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Default: us-east-2a
+  AmiId:
+    Type: String
+    Default: "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}"
+    Description: AMI Amazon Linux 2023 x86_64. Se puede reemplazar por una AMI verificada.
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t3.micro, t3.small, t3.medium]
+  GitBranch:
+    Type: String
+    Default: main
+    AllowedPattern: "^[A-Za-z0-9._/-]+$"
+  BackendRepoUrl:
+    Type: String
+    Default: https://github.com/ReyMar81/backend-control-asistencia.git
+  FrontendRepoUrl:
+    Type: String
+    Default: https://github.com/ReyMar81/frontend-control-asistencia.git
+  DbUser:
+    Type: String
+    Default: ca_app
+  DbName:
+    Type: String
+    Default: control_asistencia
+  DbPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 12
+    AllowedPattern: "^[^\\r\\n]+$"
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    AllowedPattern: "^[^\\r\\n]+$"
+  ClientUrl:
+    Type: String
+    Default: http://localhost:5173
+  BackendPort:
+    Type: Number
+    Default: 3000
+    AllowedValues: [3000]
+  GithubDeployBranch:
+    Type: String
+    Default: main
+    AllowedPattern: "^[A-Za-z0-9._/-]+$"
+  GithubFrontendRepository:
+    Type: String
+    Default: ReyMar81/frontend-control-asistencia
+  GithubBackendRepository:
+    Type: String
+    Default: ReyMar81/backend-control-asistencia
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-vpc"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: cloudformation
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-igw"
+
+  VpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetCidr
+      AvailabilityZone: !Ref AvailabilityZone
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-public-subnet"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: cloudformation
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-public-rt"
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  FrontendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Public HTTP and HTTPS access for the frontend
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - Description: HTTP from Internet
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - Description: HTTPS from Internet
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-frontend-sg"
+
+  BackendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Backend API access only from the frontend security group
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - Description: API only from frontend
+          IpProtocol: tcp
+          FromPort: !Ref BackendPort
+          ToPort: !Ref BackendPort
+          SourceSecurityGroupId: !Ref FrontendSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-backend-sg"
+
+  Ec2SsmRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ec2.amazonaws.com]
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-ec2-ssm-role"
+
+  Ec2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref Ec2SsmRole]
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-ec2-ssm-profile"
+
+  GithubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+
+  GithubFrontendDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-github-frontend-deploy"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GithubOidcProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GithubFrontendRepository}:ref:refs/heads/${GithubDeployBranch}"
+      Policies:
+        - PolicyName: !Sub "${ProjectName}-github-frontend-ssm"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript"
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+                Condition:
+                  StringEquals:
+                    ssm:resourceTag/Name: !Sub "${ProjectName}-frontend"
+              - Effect: Allow
+                Action:
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommandInvocations
+                Resource: "*"
+
+  GithubBackendDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-github-backend-deploy"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GithubOidcProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GithubBackendRepository}:ref:refs/heads/${GithubDeployBranch}"
+      Policies:
+        - PolicyName: !Sub "${ProjectName}-github-backend-ssm"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript"
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+                Condition:
+                  StringEquals:
+                    ssm:resourceTag/Name: !Sub "${ProjectName}-backend"
+              - Effect: Allow
+                Action:
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommandInvocations
+                Resource: "*"
+
+  BackendInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref BackendSecurityGroup]
+      IamInstanceProfile: !Ref Ec2InstanceProfile
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+__BACKEND_USER_DATA__
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 30
+            VolumeType: gp3
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-backend"
+
+  FrontendInstance:
+    Type: AWS::EC2::Instance
+    DependsOn: BackendInstance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref FrontendSecurityGroup]
+      IamInstanceProfile: !Ref Ec2InstanceProfile
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+__FRONTEND_USER_DATA__
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 30
+            VolumeType: gp3
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-frontend"
+
+Outputs:
+  FrontendPublicIp:
+    Description: IP pública dinámica del frontend
+    Value: !GetAtt FrontendInstance.PublicIp
+  FrontendPrivateIp:
+    Description: IP privada del frontend
+    Value: !GetAtt FrontendInstance.PrivateIp
+  BackendPublicIp:
+    Description: IP pública dinámica del backend
+    Value: !GetAtt BackendInstance.PublicIp
+  BackendPrivateIp:
+    Description: IP privada del backend
+    Value: !GetAtt BackendInstance.PrivateIp
+  ApplicationUrl:
+    Description: URL HTTP de la aplicación
+    Value: !Sub "http://${FrontendInstance.PublicIp}"
+  GithubFrontendDeployRoleArn:
+    Description: ARN del rol OIDC para el workflow frontend
+    Value: !GetAtt GithubFrontendDeployRole.Arn
+  GithubBackendDeployRoleArn:
+    Description: ARN del rol OIDC para el workflow backend
+    Value: !GetAtt GithubBackendDeployRole.Arn

@@ -1,0 +1,27 @@
+name: Pulumi preview
+
+# Esqueleto Etapa 2.
+# No se ejecuta automáticamente y no llama a AWS.
+# Requisitos pendientes:
+# - OIDC y rol de preview.
+# - Backend de estado de Pulumi.
+# - Stack configurado.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    name: Preview (esqueleto)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Estado de la etapa
+        run: |
+          echo "Esqueleto de Pulumi preview."
+          echo "No se ejecutan npm install, pulumi preview ni llamadas a AWS."
+          echo "Implementar OIDC y backend de estado antes de habilitar."

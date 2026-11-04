@@ -1,0 +1,28 @@
+name: Pulumi up
+
+# Esqueleto Etapa 2.
+# Solo manual. No hay despliegue automático ni llamadas a AWS.
+# Requisitos pendientes:
+# - OIDC y rol de up de mínimo privilegio.
+# - Entorno protegido con aprobación manual.
+# - Preview revisado y aprobado.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  up:
+    name: Up (no implementado)
+    runs-on: ubuntu-latest
+    environment: pulumi-up
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bloqueo de seguridad
+        run: |
+          echo "Pulumi up no implementado en Etapa 2."
+          echo "Este workflow no ejecuta comandos de AWS."
+          exit 1

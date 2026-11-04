@@ -1,0 +1,21 @@
+{
+  "name": "control-asistencia-infrastructure",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pulumi para la infraestructura AWS de Control de Asistencia",
+  "main": "index.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "preview": "pulumi preview",
+    "up": "pulumi up"
+  },
+  "dependencies": {
+    "@pulumi/aws": "^6.0.0",
+    "@pulumi/pulumi": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

@@ -1,0 +1,46 @@
+[
+  {
+    "ParameterKey": "ProjectName",
+    "ParameterValue": "control-asistencia"
+  },
+  {
+    "ParameterKey": "Environment",
+    "ParameterValue": "dev"
+  },
+  {
+    "ParameterKey": "VpcCidr",
+    "ParameterValue": "10.10.0.0/16"
+  },
+  {
+    "ParameterKey": "PublicSubnetCidr",
+    "ParameterValue": "10.10.1.0/24"
+  },
+  {
+    "ParameterKey": "AvailabilityZone",
+    "ParameterValue": "us-east-2a"
+  },
+  {
+    "ParameterKey": "AmiId",
+    "ParameterValue": "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}"
+  },
+  {
+    "ParameterKey": "InstanceType",
+    "ParameterValue": "t3.micro"
+  },
+  {
+    "ParameterKey": "GitBranch",
+    "ParameterValue": "main"
+  },
+  {
+    "ParameterKey": "DbPassword",
+    "ParameterValue": "REPLACE_WITH_RANDOM_PASSWORD"
+  },
+  {
+    "ParameterKey": "JwtSecret",
+    "ParameterValue": "REPLACE_WITH_RANDOM_SECRET_OF_AT_LEAST_32_CHARS"
+  },
+  {
+    "ParameterKey": "ClientUrl",
+    "ParameterValue": "http://localhost:5173"
+  }
+]

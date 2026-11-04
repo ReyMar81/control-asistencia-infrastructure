@@ -1,0 +1,27 @@
+name: CloudFormation validate
+
+# Esqueleto Etapa 2.
+# No se ejecuta automáticamente y no llama a AWS.
+# Requisitos pendientes:
+# - OIDC y rol de validación.
+# - Decidir cfn-lint versus validate-template.
+# - Definir ambiente de change set.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate (esqueleto)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Estado de la etapa
+        run: |
+          echo "Esqueleto de validación CloudFormation."
+          echo "No se ejecuta cfn-lint ni validate-template en Etapa 2."
+          echo "La plantilla actual no es desplegable."

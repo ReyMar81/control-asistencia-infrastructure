@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'npm' >>"${MOCK_LOG}/npm.log"
+printf ' %q' "$@" >>"${MOCK_LOG}/npm.log"
+printf '\n' >>"${MOCK_LOG}/npm.log"
+
+case "${1:-}" in
+  --version)
+    printf '11.6.2\n'
+    ;;
+  ci)
+    mkdir -p node_modules
+    printf '{}\n' >node_modules/.package-lock.json
+    ;;
+  run)
+    if [[ "${2:-}" == "build" ]]; then
+      mkdir -p dist/assets
+      printf '<!doctype html><html><body>ok</body></html>\n' >dist/index.html
+      printf 'ok\n' >dist/assets/app.js
+    fi
+    ;;
+esac
+exit 0

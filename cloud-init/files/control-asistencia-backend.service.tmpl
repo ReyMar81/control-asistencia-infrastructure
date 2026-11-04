@@ -1,0 +1,34 @@
+[Unit]
+Description=Control de Asistencia API
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=__APP_USER__
+Group=__APP_GROUP__
+WorkingDirectory=__BACKEND_ROOT__
+EnvironmentFile=__ENV_FILE__
+Environment=TZ=__TIMEZONE__
+ExecStart=__NODE_BIN__ src/server.js
+Restart=on-failure
+RestartSec=5s
+StartLimitBurst=5
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

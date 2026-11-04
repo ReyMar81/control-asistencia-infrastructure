@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+#
+# User-data del frontend. No contiene secretos.
+set -euo pipefail
+umask 077
+
+export CA_ROLE="frontend"
+export CA_AWS_REGION="__AWS_REGION__"
+export CA_TIMEZONE="__TIMEZONE__"
+export CA_BUNDLE_BUCKET="__BUNDLE_BUCKET__"
+export CA_BUNDLE_KEY="__BUNDLE_KEY__"
+export CA_BUNDLE_VERSION="__BUNDLE_VERSION__"
+export CA_BUNDLE_SHA256="__BUNDLE_SHA256__"
+export CA_ARTIFACT_BUCKET="__ARTIFACT_BUCKET__"
+export CA_FRONTEND_ARTIFACT_KEY="__FRONTEND_ARTIFACT_KEY__"
+export CA_FRONTEND_ARTIFACT_SHA256="__FRONTEND_ARTIFACT_SHA256__"
+export CA_BACKEND_PRIVATE_IP="__BACKEND_PRIVATE_IP__"
+export CA_LOG_TO_FILE="1"
+
+fail() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+[[ "${EUID}" -eq 0 ]] || fail "La user-data debe ejecutarse como root."
+for name in CA_AWS_REGION CA_TIMEZONE CA_BUNDLE_BUCKET CA_BUNDLE_KEY CA_BUNDLE_VERSION \
+  CA_BUNDLE_SHA256 CA_ARTIFACT_BUCKET CA_FRONTEND_ARTIFACT_KEY \
+  CA_FRONTEND_ARTIFACT_SHA256 CA_BACKEND_PRIVATE_IP; do
+  case "${!name}" in
+    *__*__*) fail "Placeholder sin sustituir en ${name}." ;;
+  esac
+done
+
+[[ "${CA_BUNDLE_VERSION}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || fail "BundleVersion invalida."
+[[ "${CA_BUNDLE_SHA256}" =~ ^[a-fA-F0-9]{64}$ ]] || fail "BundleSha256 invalido."
+[[ "${CA_FRONTEND_ARTIFACT_SHA256}" =~ ^[a-fA-F0-9]{64}$ ]] || fail "FrontendArtifactSha256 invalido."
+
+if ! command -v aws >/dev/null 2>&1; then
+  dnf install -y awscli-2
+fi
+aws --version 2>&1 | grep -q 'aws-cli/2\.' || fail "Se requiere AWS CLI v2."
+
+work="$(mktemp -d /var/tmp/control-asistencia-bundle.XXXXXX)"
+trap 'rm -rf "${work}"' EXIT
+archive="${work}/bundle.tar.gz"
+
+aws s3 cp --only-show-errors --region "${CA_AWS_REGION}" \
+  "s3://${CA_BUNDLE_BUCKET}/${CA_BUNDLE_KEY}" "${archive}"
+actual="$(sha256sum "${archive}" | awk '{print tolower($1)}')"
+[[ "${actual}" == "${CA_BUNDLE_SHA256,,}" ]] || fail "Checksum del bundle no coincide."
+
+while IFS= read -r entry; do
+  [[ -z "${entry}" ]] && continue
+  [[ "${entry}" == /* ]] && fail "El bundle contiene una ruta absoluta."
+  [[ "/${entry}/" == *"/../"* ]] && fail "El bundle contiene una ruta con .."
+done < <(tar -tzf "${archive}")
+if tar -tvzf "${archive}" | awk '$1 ~ /^[lh]/ {found=1} END {exit (found ? 0 : 1)}'; then
+  fail "El bundle contiene enlaces; no se permite."
+fi
+
+destination="/opt/control-asistencia/cloud-init/${CA_BUNDLE_VERSION}"
+temporary="${destination}.tmp.$$"
+rm -rf -- "${temporary}"
+install -d -m 0700 "${temporary}"
+tar -xzf "${archive}" -C "${temporary}" --no-same-owner --no-same-permissions
+[[ -f "${temporary}/bootstrap.sh" ]] || fail "El bundle no contiene bootstrap.sh."
+chmod 0755 "${temporary}/bootstrap.sh"
+rm -rf -- "${destination}"
+mv -- "${temporary}" "${destination}"
+
+"${destination}/bootstrap.sh" --role "${CA_ROLE}"

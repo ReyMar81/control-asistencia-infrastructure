@@ -1,0 +1,159 @@
+#cloud-config
+
+# ==============================================================================
+# ETAPA 3A-R: Cloud-Init para Instancia Backend-DB (Amazon Linux 2023)
+# ==============================================================================
+
+# 1. packages: Instalación de dependencias del sistema
+packages:
+  - git
+  - nodejs24
+  - npm
+  - postgresql17
+  - postgresql17-server
+  - postgresql17-contrib
+
+# 2. write_files: Configuraciones, unidad systemd y scripts operativos
+write_files:
+  # Servicio systemd del backend
+  - path: /etc/systemd/system/control-asistencia-backend.service
+    permissions: '0644'
+    owner: root:root
+    content: |
+      [Unit]
+      Description=Control de Asistencia Backend API
+      After=network-online.target postgresql.service
+      Wants=network-online.target postgresql.service
+
+      [Service]
+      Type=simple
+      User=ec2-user
+      Group=ec2-user
+      WorkingDirectory=/opt/control-asistencia-backend
+      EnvironmentFile=/etc/control-asistencia/backend.env
+      Environment=TZ=America/La_Paz
+      ExecStart=/usr/bin/node src/server.js
+      Restart=on-failure
+      RestartSec=5s
+
+      [Install]
+      WantedBy=multi-user.target
+
+  # Variables de entorno de la aplicación
+  - path: /etc/control-asistencia/backend.env
+    permissions: '0600'
+    owner: ec2-user:ec2-user
+    content: |
+      NODE_ENV="production"
+      PORT="${PORT}"
+      DATABASE_URL="postgres://${DB_USER}:${DB_PASSWORD}@127.0.0.1:5432/${DB_NAME}"
+      JWT_SECRET="${JWT_SECRET}"
+      CLIENT_URL="${CLIENT_URL}"
+
+  # Script de inicialización y preparación de PostgreSQL
+  - path: /usr/local/bin/setup-database.sh
+    permissions: '0755'
+    owner: root:root
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      echo "=== Configurando PostgreSQL 17 ==="
+
+      # Inicializar clúster si no existe
+      if [ ! -f /var/lib/pgsql/data/PG_VERSION ]; then
+        postgresql-setup --initdb
+      fi
+
+      # Configurar escucha en localhost y cifrado scram-sha-256
+      sed -i "s/#listen_addresses = 'localhost'/listen_addresses = 'localhost'/" /var/lib/pgsql/data/postgresql.conf 2>/dev/null || true
+      sed -i "s/#password_encryption = scram-sha-256/password_encryption = scram-sha-256/" /var/lib/pgsql/data/postgresql.conf 2>/dev/null || true
+
+      cat > /var/lib/pgsql/data/pg_hba.conf << 'EOF'
+      local   all             postgres                                peer
+      local   all             all                                     scram-sha-256
+      host    all             all             127.0.0.1/32            scram-sha-256
+      host    all             all             ::1/128                 scram-sha-256
+      EOF
+
+      systemctl enable --now postgresql
+
+      # Esperar disponibilidad
+      until pg_isready -h 127.0.0.1 -p 5432 -q; do
+        sleep 1
+      done
+
+      # Crear rol y base de datos como superusuario postgres
+      runuser -u postgres -- psql -v ON_ERROR_STOP=1 << EOF
+      DO \$\$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${DB_USER}') THEN
+          CREATE ROLE "${DB_USER}" WITH LOGIN PASSWORD '${DB_PASSWORD}';
+        ELSE
+          ALTER ROLE "${DB_USER}" WITH PASSWORD '${DB_PASSWORD}';
+        END IF;
+      END
+      \$\$;
+
+      SELECT 'CREATE DATABASE "${DB_NAME}" OWNER "${DB_USER}" ENCODING ''UTF8'''
+      WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${DB_NAME}')\gexec
+
+      GRANT ALL PRIVILEGES ON DATABASE "${DB_NAME}" TO "${DB_USER}";
+      EOF
+
+      # Instalar extensiones necesarias en la base de datos de aplicación
+      runuser -u postgres -- psql -d "${DB_NAME}" -v ON_ERROR_STOP=1 -c \
+        "CREATE EXTENSION IF NOT EXISTS citext; CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE EXTENSION IF NOT EXISTS unaccent;"
+
+      # Ejecutar schema.sql filtrando CREATE DATABASE y \connect
+      SCHEMA_SRC="/opt/control-asistencia-backend/schema.sql"
+      if [ -f "$SCHEMA_SRC" ]; then
+        TMP_SQL=$(mktemp)
+        awk '!/^[[:space:]]*[Cc][Rr][Ee][Aa][Tt][Ee][[:space:]]+[Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]/ && !/^[[:space:]]*\\[Cc][Oo][Nn][Nn][Ee][Cc][Tt]/' "$SCHEMA_SRC" > "$TMP_SQL"
+        PGPASSWORD="${DB_PASSWORD}" psql -h 127.0.0.1 -p 5432 -U "${DB_USER}" -d "${DB_NAME}" -v ON_ERROR_STOP=1 -f "$TMP_SQL"
+        rm -f "$TMP_SQL"
+        echo "=== Esquema de base de datos aplicado exitosamente ==="
+      fi
+
+  # Script de actualización para GitHub Actions vía SSM (git push)
+  - path: /usr/local/bin/deploy-backend.sh
+    permissions: '0755'
+    owner: root:root
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      echo "=== Despliegue de actualización Backend ==="
+      cd /opt/control-asistencia-backend
+      git fetch origin "${GIT_BRANCH}"
+      git reset --hard "origin/${GIT_BRANCH}"
+      npm ci --omit=dev
+      systemctl restart control-asistencia-backend
+      sleep 2
+      curl -fsS http://127.0.0.1:3000/api/health || { echo "ERROR: Health check falló"; exit 1; }
+      echo "=== Backend actualizado y verificado exitosamente ==="
+
+# 3. runcmd: Pasos de instalación, clonado y puesta en marcha
+runcmd:
+  # Configurar zona horaria del sistema
+  - timedatectl set-timezone America/La_Paz
+
+  # Directorios de aplicación y configuración
+  - mkdir -p /etc/control-asistencia /opt/control-asistencia-backend
+  - chown -R ec2-user:ec2-user /opt/control-asistencia-backend /etc/control-asistencia
+
+  # Clonar repositorio de la aplicación backend
+  - su - ec2-user -c "git clone -b ${GIT_BRANCH} ${BACKEND_REPO_URL} /opt/control-asistencia-backend"
+
+  # Instalar dependencias de producción con lockfile
+  - su - ec2-user -c "cd /opt/control-asistencia-backend && npm ci --omit=dev"
+
+  # Ejecutar configuración de PostgreSQL y base de datos
+  - /usr/local/bin/setup-database.sh
+
+  # Habilitar e iniciar servicio backend
+  - systemctl daemon-reload
+  - systemctl enable --now control-asistencia-backend
+
+  # Validar endpoint de salud
+  - sleep 3
+  - curl -fsS http://127.0.0.1:3000/api/health
+

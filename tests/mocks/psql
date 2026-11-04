@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf 'psql' >>"${MOCK_LOG}/psql.log"
+printf ' %q' "$@" >>"${MOCK_LOG}/psql.log"
+printf '\n' >>"${MOCK_LOG}/psql.log"
+
+if [[ "${1:-}" == "--version" ]]; then
+  printf 'psql (PostgreSQL) 17.0\n'
+  exit 0
+fi
+
+database="postgres"
+query=""
+file=""
+i=1
+while (( i <= $# )); do
+  case "${!i}" in
+    -d)
+      i=$((i + 1))
+      database="${!i}"
+      ;;
+    -tAc|-c)
+      i=$((i + 1))
+      query="${!i}"
+      ;;
+    -f)
+      i=$((i + 1))
+      file="${!i}"
+      ;;
+  esac
+  i=$((i + 1))
+done
+
+if [[ -n "${file}" ]]; then
+  [[ -f "${file}" ]] || { printf 'psql mock: no existe %s\n' "${file}" >&2; exit 1; }
+  cp "${file}" "${MOCK_SQL_LOG}/$(date +%s%N)-$(basename "${file}")"
+  if grep -qE 'CREATE[[:space:]]+ROLE|ALTER[[:space:]]+ROLE' "${file}"; then
+    touch "${MOCK_DB_DIR}/role"
+  fi
+  if grep -q 'CREATE DATABASE' "${file}"; then
+    touch "${MOCK_DB_DIR}/database"
+  fi
+  if grep -q 'CREATE EXTENSION' "${file}"; then
+    touch "${MOCK_DB_DIR}/extensions"
+  fi
+  if grep -qE 'INSERT INTO app_users|UPDATE app_users' "${file}"; then
+    touch "${MOCK_DB_DIR}/admin"
+  fi
+  exit 0
+fi
+
+if [[ -n "${query}" ]]; then
+  case "${query}" in
+    *pg_roles*)
+      [[ -f "${MOCK_DB_DIR}/role" ]] && printf '1\n'
+      ;;
+    *pg_database*)
+      [[ -f "${MOCK_DB_DIR}/database" ]] && printf '1\n'
+      ;;
+    *app_users*)
+      [[ -f "${MOCK_DB_DIR}/admin" ]] && printf '1\n'
+      ;;
+  esac
+  exit 0
+fi
+
+exit 0

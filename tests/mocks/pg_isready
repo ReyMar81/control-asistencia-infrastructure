@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'pg_isready' >>"${MOCK_LOG}/pg_isready.log"
+printf ' %q' "$@" >>"${MOCK_LOG}/pg_isready.log"
+printf '\n' >>"${MOCK_LOG}/pg_isready.log"
+exit 0

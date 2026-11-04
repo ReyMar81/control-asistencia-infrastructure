@@ -1,0 +1,28 @@
+name: Terraform plan
+
+# Esqueleto Etapa 2.
+# No se ejecuta automáticamente y no llama a AWS.
+# Requisitos pendientes:
+# - Proveedor OIDC de GitHub.
+# - Rol IAM de plan con permisos de solo lectura.
+# - Backend de estado configurado.
+# - Entorno protegido de GitHub.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan (esqueleto)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Estado de la etapa
+        run: |
+          echo "Esqueleto de Terraform plan."
+          echo "No se ejecutan init, validate ni plan contra AWS en Etapa 2."
+          echo "Implementar OIDC y backend antes de habilitar este workflow."

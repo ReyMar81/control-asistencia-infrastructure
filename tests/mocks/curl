@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'curl' >>"${MOCK_LOG}/curl.log"
+printf ' %q' "$@" >>"${MOCK_LOG}/curl.log"
+printf '\n' >>"${MOCK_LOG}/curl.log"
+exit 0

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'postgresql-setup' >>"${MOCK_LOG}/postgresql-setup.log"
+printf ' %q' "$@" >>"${MOCK_LOG}/postgresql-setup.log"
+printf '\n' >>"${MOCK_LOG}/postgresql-setup.log"
+
+if [[ "${1:-}" == "--initdb" ]]; then
+  mkdir -p "${CA_PGDATA_ROOT}"
+  printf '17\n' >"${CA_PGDATA_ROOT}/PG_VERSION"
+  printf '# mock postgresql.conf\n' >"${CA_PGDATA_ROOT}/postgresql.conf"
+  printf '# mock pg_hba.conf\n' >"${CA_PGDATA_ROOT}/pg_hba.conf"
+fi
+exit 0

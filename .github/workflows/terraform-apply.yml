@@ -1,0 +1,29 @@
+name: Terraform apply
+
+# Esqueleto Etapa 2.
+# Solo manual. No hay despliegue automático ni llamadas a AWS.
+# Requisitos pendientes:
+# - OIDC y rol de apply de mínimo privilegio.
+# - Entorno protegido con aprobación manual.
+# - Plan revisado y aprobado.
+# - Confirmación explícita.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    name: Apply (no implementado)
+    runs-on: ubuntu-latest
+    environment: terraform-apply
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bloqueo de seguridad
+        run: |
+          echo "Terraform apply no implementado en Etapa 2."
+          echo "Este workflow no ejecuta comandos de AWS."
+          exit 1

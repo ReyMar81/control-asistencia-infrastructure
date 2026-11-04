@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf 'aws' >>"${MOCK_LOG}/aws.log"
+printf ' %q' "$@" >>"${MOCK_LOG}/aws.log"
+printf '\n' >>"${MOCK_LOG}/aws.log"
+
+if [[ "${1:-}" == "--version" ]]; then
+  printf 'aws-cli/2.15.30 Python/3.11.8 Linux/6.1 exe/x86_64.amzn.2023\n'
+  exit 0
+fi
+
+if [[ "${1:-}" == "s3" && "${2:-}" == "cp" ]]; then
+  source_uri=""
+  for arg in "$@"; do
+    case "${arg}" in
+      s3://*) source_uri="${arg}" ;;
+    esac
+  done
+  [[ -n "${source_uri}" ]] || { printf 'aws mock: falta s3://\n' >&2; exit 1; }
+  destination="${!#}"
+  key="${source_uri#s3://}"
+  key="${key#*/}"
+  [[ -f "${MOCK_S3_DIR}/${key}" ]] || { printf 'aws mock: no existe %s\n' "${key}" >&2; exit 1; }
+  cp "${MOCK_S3_DIR}/${key}" "${destination}"
+  exit 0
+fi
+
+if [[ "${1:-}" == "secretsmanager" && "${2:-}" == "get-secret-value" ]]; then
+  cat "${MOCK_SECRET_FILE}"
+  exit 0
+fi
+
+printf 'aws mock: comando no soportado\n' >&2
+exit 1

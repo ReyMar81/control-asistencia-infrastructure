@@ -1,0 +1,29 @@
+name: Deploy backend
+
+# Esqueleto Etapa 2.
+# Solo manual. No hay despliegue automático ni llamadas a AWS.
+# Integración futura:
+# - repository_dispatch desde ReyMar81/backend-control-asistencia.
+# - workflow_call o GitHub App con permisos mínimos.
+# - OIDC para asumir un rol de despliegue de backend.
+# - S3 para artefacto y SSM Run Command para aplicar.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy backend (no implementado)
+    runs-on: ubuntu-latest
+    environment: deploy-backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bloqueo de seguridad
+        run: |
+          echo "Despliegue de backend no implementado en Etapa 2."
+          echo "No se descarga, publica ni despliega nada."
+          exit 1

@@ -1,0 +1,28 @@
+name: CloudFormation deploy
+
+# Esqueleto Etapa 2.
+# Solo manual. No hay despliegue automático ni llamadas a AWS.
+# Requisitos pendientes:
+# - OIDC y rol de despliegue.
+# - Entorno protegido con aprobación manual.
+# - Change set revisado y aprobado.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy (no implementado)
+    runs-on: ubuntu-latest
+    environment: cloudformation-deploy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bloqueo de seguridad
+        run: |
+          echo "CloudFormation deploy no implementado en Etapa 2."
+          echo "Este workflow no ejecuta comandos de AWS."
+          exit 1

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'rpm' >>"${MOCK_LOG}/rpm.log"
+printf ' %q' "$@" >>"${MOCK_LOG}/rpm.log"
+printf '\n' >>"${MOCK_LOG}/rpm.log"
+exit 0

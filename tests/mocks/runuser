@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'runuser' >>"${MOCK_LOG}/runuser.log"
+printf ' %q' "$@" >>"${MOCK_LOG}/runuser.log"
+printf '\n' >>"${MOCK_LOG}/runuser.log"
+
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "--" ]]; then
+    shift
+    exec "$@"
+  fi
+  shift
+done
+exit 1

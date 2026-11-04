@@ -1,0 +1,24 @@
+aws_region          = "us-east-2"
+project_name        = "control-asistencia"
+environment         = "dev"
+vpc_cidr            = "10.10.0.0/16"
+public_subnet_cidr  = "10.10.1.0/24"
+availability_zone   = "us-east-2a"
+
+# Vacío para seleccionar dinámicamente la AMI AL2023 x86_64 oficial más reciente,
+# o indicar una AMI verificada de us-east-2.
+ami_id        = ""
+instance_type = "t3.micro"
+timezone      = "America/La_Paz"
+
+backend_repo_url  = "https://github.com/ReyMar81/backend-control-asistencia.git"
+frontend_repo_url = "https://github.com/ReyMar81/frontend-control-asistencia.git"
+git_branch        = "main"
+
+# Proporcionar mediante un archivo tfvars local no versionado o variables de entorno.
+db_user     = "ca_app"
+db_password = "REPLACE_WITH_A_RANDOM_PASSWORD"
+db_name     = "control_asistencia"
+jwt_secret  = "REPLACE_WITH_A_RANDOM_SECRET_OF_AT_LEAST_32_CHARACTERS"
+client_url  = "http://localhost:5173"
+backend_port = 3000

@@ -1,0 +1,6 @@
+name: control-asistencia-infrastructure
+runtime:
+  name: nodejs
+  options:
+    packagemanager: npm
+description: Infraestructura AWS de Control de Asistencia — Pulumi Etapa 3C

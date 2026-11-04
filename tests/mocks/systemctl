@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'systemctl' >>"${MOCK_LOG}/systemctl.log"
+printf ' %q' "$@" >>"${MOCK_LOG}/systemctl.log"
+printf '\n' >>"${MOCK_LOG}/systemctl.log"
+
+case "${1:-}" in
+  is-active)
+    printf 'active\n'
+    ;;
+  show)
+    printf 'active\n'
+    ;;
+esac
+exit 0

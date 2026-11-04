@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'nginx' >>"${MOCK_LOG}/nginx.log"
+printf ' %q' "$@" >>"${MOCK_LOG}/nginx.log"
+printf '\n' >>"${MOCK_LOG}/nginx.log"
+
+if [[ "${1:-}" == "-v" ]]; then
+  printf 'nginx version: nginx/1.26.0\n' >&2
+fi
+exit 0

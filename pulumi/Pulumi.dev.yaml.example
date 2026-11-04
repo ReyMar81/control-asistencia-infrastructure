@@ -1,0 +1,21 @@
+# Configuración de ejemplo. No contiene credenciales ni secretos reales.
+config:
+  control-asistencia-infrastructure:awsRegion: us-east-2
+  control-asistencia-infrastructure:projectName: control-asistencia
+  control-asistencia-infrastructure:environment: dev
+  control-asistencia-infrastructure:vpcCidr: 10.10.0.0/16
+  control-asistencia-infrastructure:publicSubnetCidr: 10.10.1.0/24
+  control-asistencia-infrastructure:availabilityZone: us-east-2a
+  control-asistencia-infrastructure:instanceType: t3.micro
+  control-asistencia-infrastructure:amiId: ""
+  control-asistencia-infrastructure:gitBranch: main
+  control-asistencia-infrastructure:dbUser: ca_app
+  control-asistencia-infrastructure:dbName: control_asistencia
+  control-asistencia-infrastructure:clientUrl: http://localhost:5173
+  control-asistencia-infrastructure:backendPort: 3000
+  control-asistencia-infrastructure:githubDeployBranch: main
+  control-asistencia-infrastructure:githubFrontendRepository: ReyMar81/frontend-control-asistencia
+  control-asistencia-infrastructure:githubBackendRepository: ReyMar81/backend-control-asistencia
+  # Configurar fuera de Git:
+  # pulumi config set --secret dbPassword '...'
+  # pulumi config set --secret jwtSecret '...'

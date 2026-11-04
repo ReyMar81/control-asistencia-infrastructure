@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'dnf' >>"${MOCK_LOG}/dnf.log"
+printf ' %q' "$@" >>"${MOCK_LOG}/dnf.log"
+printf '\n' >>"${MOCK_LOG}/dnf.log"
+exit 0

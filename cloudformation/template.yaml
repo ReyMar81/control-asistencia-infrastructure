@@ -1,0 +1,619 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Control de Asistencia - arquitectura EC2 académica
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: control-asistencia
+    AllowedPattern: "^[a-z][a-z0-9-]+$"
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+  VpcCidr:
+    Type: String
+    Default: 10.10.0.0/16
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.10.1.0/24
+  AvailabilityZone:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Default: us-east-2a
+  AmiId:
+    Type: String
+    Default: "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}"
+    Description: AMI Amazon Linux 2023 x86_64. Se puede reemplazar por una AMI verificada.
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t3.micro, t3.small, t3.medium]
+  GitBranch:
+    Type: String
+    Default: main
+    AllowedPattern: "^[A-Za-z0-9._/-]+$"
+  BackendRepoUrl:
+    Type: String
+    Default: https://github.com/ReyMar81/backend-control-asistencia.git
+  FrontendRepoUrl:
+    Type: String
+    Default: https://github.com/ReyMar81/frontend-control-asistencia.git
+  DbUser:
+    Type: String
+    Default: ca_app
+  DbName:
+    Type: String
+    Default: control_asistencia
+  DbPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 12
+    AllowedPattern: "^[^\\r\\n]+$"
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    AllowedPattern: "^[^\\r\\n]+$"
+  ClientUrl:
+    Type: String
+    Default: http://localhost:5173
+  BackendPort:
+    Type: Number
+    Default: 3000
+    AllowedValues: [3000]
+  GithubDeployBranch:
+    Type: String
+    Default: main
+    AllowedPattern: "^[A-Za-z0-9._/-]+$"
+  GithubFrontendRepository:
+    Type: String
+    Default: ReyMar81/frontend-control-asistencia
+  GithubBackendRepository:
+    Type: String
+    Default: ReyMar81/backend-control-asistencia
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-vpc"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: cloudformation
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-igw"
+
+  VpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetCidr
+      AvailabilityZone: !Ref AvailabilityZone
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-public-subnet"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: cloudformation
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-public-rt"
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  FrontendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Public HTTP and HTTPS access for the frontend
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - Description: HTTP from Internet
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - Description: HTTPS from Internet
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-frontend-sg"
+
+  BackendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Backend API access only from the frontend security group
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - Description: API only from frontend
+          IpProtocol: tcp
+          FromPort: !Ref BackendPort
+          ToPort: !Ref BackendPort
+          SourceSecurityGroupId: !Ref FrontendSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-backend-sg"
+
+  Ec2SsmRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ec2.amazonaws.com]
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-ec2-ssm-role"
+
+  Ec2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref Ec2SsmRole]
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-ec2-ssm-profile"
+
+  GithubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+
+  GithubFrontendDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-github-frontend-deploy"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GithubOidcProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GithubFrontendRepository}:ref:refs/heads/${GithubDeployBranch}"
+      Policies:
+        - PolicyName: !Sub "${ProjectName}-github-frontend-ssm"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript"
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+                Condition:
+                  StringEquals:
+                    ssm:resourceTag/Name: !Sub "${ProjectName}-frontend"
+              - Effect: Allow
+                Action:
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommandInvocations
+                Resource: "*"
+
+  GithubBackendDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-github-backend-deploy"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GithubOidcProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GithubBackendRepository}:ref:refs/heads/${GithubDeployBranch}"
+      Policies:
+        - PolicyName: !Sub "${ProjectName}-github-backend-ssm"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript"
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+                Condition:
+                  StringEquals:
+                    ssm:resourceTag/Name: !Sub "${ProjectName}-backend"
+              - Effect: Allow
+                Action:
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommandInvocations
+                Resource: "*"
+
+  BackendInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref BackendSecurityGroup]
+      IamInstanceProfile: !Ref Ec2InstanceProfile
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #cloud-config
+            
+            # ==============================================================================
+            # ETAPA 3A-R: Cloud-Init para Instancia Backend-DB (Amazon Linux 2023)
+            # ==============================================================================
+            
+            # 1. packages: Instalación de dependencias del sistema
+            packages:
+              - git
+              - nodejs24
+              - npm
+              - postgresql17
+              - postgresql17-server
+              - postgresql17-contrib
+            
+            # 2. write_files: Configuraciones, unidad systemd y scripts operativos
+            write_files:
+              # Servicio systemd del backend
+              - path: /etc/systemd/system/control-asistencia-backend.service
+                permissions: '0644'
+                owner: root:root
+                content: |
+                  [Unit]
+                  Description=Control de Asistencia Backend API
+                  After=network-online.target postgresql.service
+                  Wants=network-online.target postgresql.service
+            
+                  [Service]
+                  Type=simple
+                  User=ec2-user
+                  Group=ec2-user
+                  WorkingDirectory=/opt/control-asistencia-backend
+                  EnvironmentFile=/etc/control-asistencia/backend.env
+                  Environment=TZ=America/La_Paz
+                  ExecStart=/usr/bin/node src/server.js
+                  Restart=on-failure
+                  RestartSec=5s
+            
+                  [Install]
+                  WantedBy=multi-user.target
+            
+              # Variables de entorno de la aplicación
+              - path: /etc/control-asistencia/backend.env
+                permissions: '0600'
+                owner: ec2-user:ec2-user
+                content: |
+                  NODE_ENV="production"
+                  PORT="${BackendPort}"
+                  DATABASE_URL="postgres://${DbUser}:${DbPassword}@127.0.0.1:5432/${DbName}"
+                  JWT_SECRET="${JwtSecret}"
+                  CLIENT_URL="${ClientUrl}"
+            
+              # Script de inicialización y preparación de PostgreSQL
+              - path: /usr/local/bin/setup-database.sh
+                permissions: '0755'
+                owner: root:root
+                content: |
+                  #!/usr/bin/env bash
+                  set -euo pipefail
+                  echo "=== Configurando PostgreSQL 17 ==="
+            
+                  # Inicializar clúster si no existe
+                  if [ ! -f /var/lib/pgsql/data/PG_VERSION ]; then
+                    postgresql-setup --initdb
+                  fi
+            
+                  # Configurar escucha en localhost y cifrado scram-sha-256
+                  sed -i "s/#listen_addresses = 'localhost'/listen_addresses = 'localhost'/" /var/lib/pgsql/data/postgresql.conf 2>/dev/null || true
+                  sed -i "s/#password_encryption = scram-sha-256/password_encryption = scram-sha-256/" /var/lib/pgsql/data/postgresql.conf 2>/dev/null || true
+            
+                  cat > /var/lib/pgsql/data/pg_hba.conf << 'EOF'
+                  local   all             postgres                                peer
+                  local   all             all                                     scram-sha-256
+                  host    all             all             127.0.0.1/32            scram-sha-256
+                  host    all             all             ::1/128                 scram-sha-256
+                  EOF
+            
+                  systemctl enable --now postgresql
+            
+                  # Esperar disponibilidad
+                  until pg_isready -h 127.0.0.1 -p 5432 -q; do
+                    sleep 1
+                  done
+            
+                  # Crear rol y base de datos como superusuario postgres
+                  runuser -u postgres -- psql -v ON_ERROR_STOP=1 << EOF
+                  DO \$\$
+                  BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${DbUser}') THEN
+                      CREATE ROLE "${DbUser}" WITH LOGIN PASSWORD '${DbPassword}';
+                    ELSE
+                      ALTER ROLE "${DbUser}" WITH PASSWORD '${DbPassword}';
+                    END IF;
+                  END
+                  \$\$;
+            
+                  SELECT 'CREATE DATABASE "${DbName}" OWNER "${DbUser}" ENCODING ''UTF8'''
+                  WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${DbName}')\gexec
+            
+                  GRANT ALL PRIVILEGES ON DATABASE "${DbName}" TO "${DbUser}";
+                  EOF
+            
+                  # Instalar extensiones necesarias en la base de datos de aplicación
+                  runuser -u postgres -- psql -d "${DbName}" -v ON_ERROR_STOP=1 -c \
+                    "CREATE EXTENSION IF NOT EXISTS citext; CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE EXTENSION IF NOT EXISTS unaccent;"
+            
+                  # Ejecutar schema.sql filtrando CREATE DATABASE y \connect
+                  SCHEMA_SRC="/opt/control-asistencia-backend/schema.sql"
+                  if [ -f "$SCHEMA_SRC" ]; then
+                    TMP_SQL=$(mktemp)
+                    awk '!/^[[:space:]]*[Cc][Rr][Ee][Aa][Tt][Ee][[:space:]]+[Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]/ && !/^[[:space:]]*\\[Cc][Oo][Nn][Nn][Ee][Cc][Tt]/' "$SCHEMA_SRC" > "$TMP_SQL"
+                    PGPASSWORD="${DbPassword}" psql -h 127.0.0.1 -p 5432 -U "${DbUser}" -d "${DbName}" -v ON_ERROR_STOP=1 -f "$TMP_SQL"
+                    rm -f "$TMP_SQL"
+                    echo "=== Esquema de base de datos aplicado exitosamente ==="
+                  fi
+            
+              # Script de actualización para GitHub Actions vía SSM (git push)
+              - path: /usr/local/bin/deploy-backend.sh
+                permissions: '0755'
+                owner: root:root
+                content: |
+                  #!/usr/bin/env bash
+                  set -euo pipefail
+                  echo "=== Despliegue de actualización Backend ==="
+                  cd /opt/control-asistencia-backend
+                  git fetch origin "${GitBranch}"
+                  git reset --hard "origin/${GitBranch}"
+                  npm ci --omit=dev
+                  systemctl restart control-asistencia-backend
+                  sleep 2
+                  curl -fsS http://127.0.0.1:3000/api/health || { echo "ERROR: Health check falló"; exit 1; }
+                  echo "=== Backend actualizado y verificado exitosamente ==="
+            
+            # 3. runcmd: Pasos de instalación, clonado y puesta en marcha
+            runcmd:
+              # Configurar zona horaria del sistema
+              - timedatectl set-timezone America/La_Paz
+            
+              # Directorios de aplicación y configuración
+              - mkdir -p /etc/control-asistencia /opt/control-asistencia-backend
+              - chown -R ec2-user:ec2-user /opt/control-asistencia-backend /etc/control-asistencia
+            
+              # Clonar repositorio de la aplicación backend
+              - su - ec2-user -c "git clone -b ${GitBranch} ${BackendRepoUrl} /opt/control-asistencia-backend"
+            
+              # Instalar dependencias de producción con lockfile
+              - su - ec2-user -c "cd /opt/control-asistencia-backend && npm ci --omit=dev"
+            
+              # Ejecutar configuración de PostgreSQL y base de datos
+              - /usr/local/bin/setup-database.sh
+            
+              # Habilitar e iniciar servicio backend
+              - systemctl daemon-reload
+              - systemctl enable --now control-asistencia-backend
+            
+              # Validar endpoint de salud
+              - sleep 3
+              - curl -fsS http://127.0.0.1:3000/api/health
+            
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 30
+            VolumeType: gp3
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-backend"
+
+  FrontendInstance:
+    Type: AWS::EC2::Instance
+    DependsOn: BackendInstance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref FrontendSecurityGroup]
+      IamInstanceProfile: !Ref Ec2InstanceProfile
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #cloud-config
+            
+            # ==============================================================================
+            # ETAPA 3A-R: Cloud-Init para Instancia Frontend (Amazon Linux 2023)
+            # ==============================================================================
+            
+            # 1. packages: Instalación de dependencias del sistema
+            packages:
+              - git
+              - nodejs24
+              - npm
+              - nginx
+            
+            # 2. write_files: Configuración de Nginx y script de actualización
+            write_files:
+              # Virtual host de Nginx para la SPA y Proxy Inverso hacia el Backend
+              - path: /etc/nginx/conf.d/control-asistencia.conf
+                permissions: '0644'
+                owner: root:root
+                content: |
+                  server {
+                      listen 80 default_server;
+                      listen [::]:80 default_server;
+                      server_name _;
+            
+                      root /var/www/control-asistencia;
+                      index index.html;
+                      client_max_body_size 10m;
+            
+                      # Endpoint de salud local para verificación de Nginx
+                      location = /healthz {
+                          access_log off;
+                          add_header Content-Type text/plain;
+                          return 200 "ok\n";
+                      }
+            
+                      # Redirección de /api a /api/ conservando método HTTP y cuerpo
+                      location = /api {
+                          return 308 /api/;
+                      }
+            
+                      # Proxy inverso hacia la IP privada del Backend en TCP 3000
+                      location /api/ {
+                          proxy_pass http://${BackendInstance.PrivateIp}:3000;
+                          proxy_http_version 1.1;
+                          proxy_set_header Host $host;
+                          proxy_set_header X-Real-IP $remote_addr;
+                          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                          proxy_set_header X-Forwarded-Proto $scheme;
+                          proxy_connect_timeout 5s;
+                          proxy_read_timeout 60s;
+                      }
+            
+                      # Enrutamiento React SPA (fallback a index.html)
+                      location / {
+                          try_files $uri $uri/ /index.html;
+                      }
+                  }
+            
+              # Script de actualización para GitHub Actions vía SSM (git push)
+              - path: /usr/local/bin/deploy-frontend.sh
+                permissions: '0755'
+                owner: root:root
+                content: |
+                  #!/usr/bin/env bash
+                  set -euo pipefail
+                  echo "=== Despliegue de actualización Frontend ==="
+                  cd /opt/control-asistencia-frontend
+                  git fetch origin "${GitBranch}"
+                  git reset --hard "origin/${GitBranch}"
+                  npm ci
+                  VITE_API_URL=/api npm run build
+                  cp -r dist/* /var/www/control-asistencia/
+                  chmod -R 755 /var/www/control-asistencia
+                  systemctl reload nginx
+                  echo "=== Frontend actualizado y Nginx recargado exitosamente ==="
+            
+            # 3. runcmd: Clonado, compilación y publicación web
+            runcmd:
+              # Configurar zona horaria del sistema
+              - timedatectl set-timezone America/La_Paz
+            
+              # Directorios de despliegue y permisos
+              - mkdir -p /var/www/control-asistencia /opt/control-asistencia-frontend
+              - chown -R ec2-user:ec2-user /opt/control-asistencia-frontend /var/www/control-asistencia
+            
+              # Clonar repositorio frontend como ec2-user
+              - su - ec2-user -c "git clone -b ${GitBranch} ${FrontendRepoUrl} /opt/control-asistencia-frontend"
+            
+              # Instalar dependencias y compilar SPA con VITE_API_URL=/api
+              - su - ec2-user -c "cd /opt/control-asistencia-frontend && npm ci && VITE_API_URL=/api npm run build"
+            
+              # Publicar artefacto compilado en la raíz web de Nginx
+              - cp -r /opt/control-asistencia-frontend/dist/* /var/www/control-asistencia/
+              - chmod -R 755 /var/www/control-asistencia
+            
+              # Limpiar configuración por defecto y validar
+              - rm -f /etc/nginx/conf.d/default.conf
+              - nginx -t
+            
+              # Habilitar e iniciar servicio Nginx
+              - systemctl enable --now nginx
+              - systemctl reload nginx
+            
+              # Validar que Nginx responde
+              - curl -fsS http://127.0.0.1/healthz
+            
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 30
+            VolumeType: gp3
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-frontend"
+
+Outputs:
+  FrontendPublicIp:
+    Description: IP pública dinámica del frontend
+    Value: !GetAtt FrontendInstance.PublicIp
+  FrontendPrivateIp:
+    Description: IP privada del frontend
+    Value: !GetAtt FrontendInstance.PrivateIp
+  BackendPublicIp:
+    Description: IP pública dinámica del backend
+    Value: !GetAtt BackendInstance.PublicIp
+  BackendPrivateIp:
+    Description: IP privada del backend
+    Value: !GetAtt BackendInstance.PrivateIp
+  ApplicationUrl:
+    Description: URL HTTP de la aplicación
+    Value: !Sub "http://${FrontendInstance.PublicIp}"
+  GithubFrontendDeployRoleArn:
+    Description: ARN del rol OIDC para el workflow frontend
+    Value: !GetAtt GithubFrontendDeployRole.Arn
+  GithubBackendDeployRoleArn:
+    Description: ARN del rol OIDC para el workflow backend
+    Value: !GetAtt GithubBackendDeployRole.Arn
